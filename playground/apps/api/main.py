@@ -4,7 +4,8 @@ from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 import logging
-from .db import engine, get_session, SQLModel
+from sqlmodel import SQLModel
+from .db import engine, get_session
 from .models import *  # Import all models to ensure they're registered with SQLAlchemy
 
 # Configure logging
@@ -68,7 +69,7 @@ async def health_check():
     }
 
 # Import and include routers
-from . import datasets, experiments, runs, artifacts  # noqa: E402
+import datasets, experiments, runs, artifacts  # noqa: E402
 
 app.include_router(datasets.router, prefix="/api/datasets", tags=["datasets"])
 app.include_router(experiments.router, prefix="/api/experiments", tags=["experiments"])
