@@ -22,21 +22,23 @@ A local-first "VS Code for ML experiments" that ingests small/medium datasets, a
 ### Installation
 
 1. **Clone the repository**
+
    ```bash
    git clone <repository-url>
    cd playground
    ```
 
 2. **Set up Python environment**
+
    ```bash
    # Create and activate a virtual environment
    python -m venv venv
    source venv/bin/activate  # On Windows: .\venv\Scripts\activate
-   
+
    # Install backend dependencies
    cd apps/api
    pip install -r requirements.txt
-   
+
    # Install core package in development mode
    cd ../../packages/core
    pip install -e .
@@ -51,12 +53,14 @@ A local-first "VS Code for ML experiments" that ingests small/medium datasets, a
 ### Running the Application
 
 1. **Start the backend API**
+
    ```bash
    cd apps/api
    uvicorn main:app --reload
    ```
 
 2. **Start the frontend**
+
    ```bash
    cd ../web
    npm run dev
