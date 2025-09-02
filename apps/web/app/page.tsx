@@ -162,12 +162,13 @@ export default function Home() {
             <p className="max-w-[85%] leading-normal text-muted-foreground sm:text-lg sm:leading-8">
               Join thousands of data scientists and ML engineers who use ML Playground to accelerate their research.
             </p>
-            <Button size="lg" className="mt-4" asChild>
-              <Link href="/datasets/upload" className="group">
-                Upload Your First Dataset
-                <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-              </Link>
-            </Button>
+            <Link 
+              href="/datasets/upload" 
+              className="group inline-flex h-12 items-center justify-center rounded-xl bg-gradient-to-r from-primary to-primary/80 px-6 font-medium text-primary-foreground shadow-lg transition-all duration-300 hover:shadow-primary/20 hover:shadow-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 mt-4"
+            >
+              Upload Your First Dataset
+              <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </Link>
           </div>
         </div>
       </section>
