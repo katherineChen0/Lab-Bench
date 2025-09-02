@@ -1,9 +1,61 @@
+'use client';
+
 import Link from 'next/link';
-import { Upload, Plus, FileText, Database } from 'lucide-react';
+import { Upload, FileText, Database, Loader2 } from 'lucide-react';
+import { useDatasets } from '@/hooks/api/use-datasets';
+import { formatDistanceToNow } from 'date-fns';
+import { formatFileSize } from '@/lib/utils';
+
+interface Dataset {
+  id: string;
+  name: string;
+  file_name: string;
+  file_size: number;
+  file_type: string;
+  num_rows: number;
+  columns: string[];
+  created_at: string;
+  updated_at: string;
+}
+
+interface DatasetListResponse {
+  items: Dataset[];
+  total: number;
+  page: number;
+  page_size: number;
+}
 
 export default function DatasetsPage() {
-  // TODO: Fetch datasets from API
-  const datasets = [];
+  const { data, isLoading, error } = useDatasets<DatasetListResponse>(1, 10);
+  const datasets = data?.items || [];
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="rounded-md bg-destructive/10 p-4">
+        <div className="flex">
+          <div className="flex-shrink-0">
+            <Database className="h-5 w-5 text-destructive" />
+          </div>
+          <div className="ml-3">
+            <h3 className="text-sm font-medium text-destructive">
+              Failed to load datasets
+            </h3>
+            <div className="mt-2 text-sm text-destructive">
+              <p>{error.message}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="container py-8">
@@ -43,7 +95,7 @@ export default function DatasetsPage() {
           </div>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {datasets.map((dataset) => (
+            {datasets.map((dataset: Dataset) => (
               <div
                 key={dataset.id}
                 className="rounded-lg border bg-card text-card-foreground shadow-sm overflow-hidden hover:shadow-md transition-shadow"
@@ -55,16 +107,18 @@ export default function DatasetsPage() {
                         <FileText className="h-5 w-5 text-primary" />
                       </div>
                       <div>
-                        <h3 className="font-medium">{dataset.name}</h3>
+                        <h3 className="font-medium">{dataset.name || 'Untitled Dataset'}</h3>
                         <p className="text-sm text-muted-foreground">
-                          {dataset.rows} rows • {dataset.columns} columns
+                          {dataset.num_rows} rows • {dataset.columns?.length || 0} columns
                         </p>
                       </div>
                     </div>
                   </div>
                   <div className="mt-4 flex justify-between text-xs text-muted-foreground">
-                    <span>Uploaded {dataset.uploadedAt}</span>
-                    <span>{dataset.size}</span>
+                    <span>
+                      {formatDistanceToNow(new Date(dataset.created_at), { addSuffix: true })}
+                    </span>
+                    <span>{formatFileSize(dataset.file_size)}</span>
                   </div>
                 </div>
                 <div className="bg-muted/50 px-6 py-3 flex justify-end space-x-2 border-t">
