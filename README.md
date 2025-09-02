@@ -24,7 +24,7 @@ A local-first "VS Code for ML experiments" that ingests small/medium datasets, a
 1. **Clone the repository**
 
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/katherineChen0/Lab-Bench.git
    cd playground
    ```
 
