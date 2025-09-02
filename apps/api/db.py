@@ -35,7 +35,7 @@ class BaseModel(SQLModel):
 
 # JSON field for SQLModel
 class JSONEncodedDict(Generic[AnyType], Field):
-    ""
+    """
     Field that stores a dictionary as a JSON string in the database.
     """
     def __init__(self, **kwargs):
