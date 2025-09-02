@@ -2,54 +2,42 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Upload, FileText, X, Loader2 } from 'lucide-react';
+import { Upload, FileText, Loader2 } from 'lucide-react';
+import { useCreateDataset } from '@/hooks/api/use-datasets';
 
 export default function UploadDatasetPage() {
   const router = useRouter();
-  const [isUploading, setIsUploading] = useState(false);
   const [file, setFile] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [name, setName] = useState('');
+  const { mutate: createDataset, isPending, error } = useCreateDataset();
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
       setFile(selectedFile);
-      setError(null);
+      // Set default name from filename without extension
+      if (!name) {
+        const fileName = selectedFile.name;
+        const nameWithoutExt = fileName.includes('.')
+          ? fileName.split('.').slice(0, -1).join('.')
+          : fileName;
+        setName(nameWithoutExt);
+      }
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file) {
-      setError('Please select a file to upload');
-      return;
-    }
+    if (!file) return;
 
-    setIsUploading(true);
-    setError(null);
-
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-
-      // TODO: Replace with actual API endpoint
-      const response = await fetch('/api/datasets', {
-        method: 'POST',
-        body: formData,
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to upload dataset');
+    createDataset(
+      { file, name: name || undefined },
+      {
+        onSuccess: (data) => {
+          router.push(`/datasets/${data.id}`);
+        },
       }
-
-      const data = await response.json();
-      router.push(`/datasets/${data.id}`);
-    } catch (err) {
-      console.error('Error uploading dataset:', err);
-      setError('Failed to upload dataset. Please try again.');
-    } finally {
-      setIsUploading(false);
-    }
+    );
   };
 
   return (
@@ -72,6 +60,9 @@ export default function UploadDatasetPage() {
                       <div className="flex flex-col items-center">
                         <FileText className="h-12 w-12 text-muted-foreground mb-2" />
                         <p className="text-sm text-muted-foreground">{file.name}</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {formatFileSize(file.size)}
+                        </p>
                         <button
                           type="button"
                           onClick={() => setFile(null)}
@@ -110,8 +101,25 @@ export default function UploadDatasetPage() {
                   </div>
                 </div>
                 {error && (
-                  <p className="mt-2 text-sm text-red-600">{error}</p>
+                  <p className="mt-2 text-sm text-destructive">{error.message}</p>
                 )}
+              </div>
+
+              <div className="space-y-2">
+                <label
+                  htmlFor="dataset-name"
+                  className="block text-sm font-medium text-foreground"
+                >
+                  Dataset Name
+                </label>
+                <input
+                  type="text"
+                  id="dataset-name"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder="Enter a name for your dataset"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
               </div>
 
               <div className="flex justify-end space-x-3">
@@ -119,16 +127,16 @@ export default function UploadDatasetPage() {
                   type="button"
                   onClick={() => router.back()}
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2"
-                  disabled={isUploading}
+                  disabled={isPending}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   className="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-10 px-4 py-2"
-                  disabled={!file || isUploading}
+                  disabled={!file || isPending}
                 >
-                  {isUploading ? (
+                  {isPending ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       Uploading...
@@ -144,4 +152,13 @@ export default function UploadDatasetPage() {
       </div>
     </div>
   );
+}
+
+// Reuse the formatFileSize function
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }

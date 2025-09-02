@@ -7,7 +7,7 @@ export function useDatasets<T = DatasetListResponse>(page: number = 1, pageSize:
   return useQuery<T, Error>({
     queryKey: ['datasets', { page, pageSize }],
     queryFn: () => datasetsApi.getDatasets(page, pageSize) as Promise<T>,
-    keepPreviousData: true,
+    placeholderData: (previousData) => previousData, // Keeps previous data while fetching
   });
 }
 

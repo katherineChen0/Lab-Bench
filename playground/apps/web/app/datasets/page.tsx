@@ -4,7 +4,14 @@ import Link from 'next/link';
 import { Upload, FileText, Database, Loader2 } from 'lucide-react';
 import { useDatasets } from '@/hooks/api/use-datasets';
 import { formatDistanceToNow } from 'date-fns';
-import { formatFileSize } from '@/lib/utils';
+// Temporary relative import - TODO: Fix module resolution
+function formatFileSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+}
 
 interface Dataset {
   id: string;
