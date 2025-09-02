@@ -1,124 +1,223 @@
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
-from typing import List, Optional
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends, status
+from typing import List, Optional, Dict, Any
 import pandas as pd
 import json
 from pathlib import Path
 import uuid
+import shutil
 from datetime import datetime
-from pydantic import BaseModel
+from sqlmodel import Session, select
+import logging
+
+from .db import get_session
+from .models import Dataset as DBDataset, DatasetStatus
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
-# In-memory storage for demo (replace with database in production)
-DATASETS = {}
+# Helper functions
+async def save_upload_file(upload_file: UploadFile, destination: Path) -> None:
+    """Save an uploaded file to the specified path."""
+    try:
+        with destination.open("wb") as buffer:
+            shutil.copyfileobj(upload_file.file, buffer)
+    except Exception as e:
+        logger.error(f"Error saving file {upload_file.filename}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error saving file: {str(e)}"
+        )
+    finally:
+        await upload_file.seek(0)
 
-class Dataset(BaseModel):
-    id: str
-    name: str
-    file_path: str
-    file_type: str
-    n_rows: int
-    n_cols: int
-    target: Optional[str] = None
-    created_at: str
-    schema_json: dict
+def infer_schema(df: pd.DataFrame) -> Dict[str, Any]:
+    """Infer schema from a pandas DataFrame."""
+    return {
+        "columns": [
+            {
+                "name": col,
+                "dtype": str(df[col].dtype),
+                "is_numeric": pd.api.types.is_numeric_dtype(df[col]),
+                "is_categorical": pd.api.types.is_categorical_dtype(df[col]),
+                "is_datetime": pd.api.types.is_datetime64_any_dtype(df[col]),
+                "n_unique": int(df[col].nunique()),
+                "missing": int(df[col].isna().sum()),
+            }
+            for col in df.columns
+        ]
+    }
 
-@router.post("/ingest", response_model=Dataset)
+# API Endpoints
+@router.post("/ingest", response_model=DBDataset, status_code=status.HTTP_201_CREATED)
 async def ingest_dataset(
+    *,
+    session: Session = Depends(get_session),
     file: UploadFile = File(...),
     name: str = Form(...),
+    description: Optional[str] = Form(None),
     target: Optional[str] = Form(None),
-    sample_limit: Optional[int] = Form(None)
+    sample_limit: Optional[int] = Form(10000)  # Default sample limit
 ):
-    """Ingest a new dataset from a file upload."""
+    """
+    Ingest a new dataset from a file upload.
+    
+    Supports CSV, JSON, JSONL, and Parquet files.
+    """
     try:
-        # Read file based on content type
-        file_type = file.filename.split('.')[-1].lower()
+        # Validate file type
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext not in ['.csv', '.json', '.jsonl', '.parquet']:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Unsupported file type. Supported formats: CSV, JSON, JSONL, Parquet"
+            )
+            
+        # Read the file with pandas
+        try:
+            if file_ext == '.csv':
+                df = pd.read_csv(file.file, nrows=sample_limit)
+            elif file_ext in ['.json', '.jsonl']:
+                df = pd.read_json(file.file, lines=(file_ext == '.jsonl'))
+            elif file_ext == '.parquet':
+                df = pd.read_parquet(file.file)
+                if sample_limit and len(df) > sample_limit:
+                    df = df.sample(sample_limit)
+        except Exception as e:
+            logger.error(f"Error reading file: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Error reading file: {str(e)}"
+            )
         
-        if file_type == 'csv':
-            df = pd.read_csv(file.file, nrows=sample_limit)
-        elif file_type in ['json', 'jsonl']:
-            df = pd.read_json(file.file, lines=(file_type == 'jsonl'))
-        elif file_type == 'parquet':
-            df = pd.read_parquet(file.file)
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_type}")
-        
-        # Generate dataset ID and save path
+        # Generate unique ID and file path
         dataset_id = str(uuid.uuid4())
-        save_dir = Path("../../datasets") / dataset_id
-        save_dir.mkdir(parents=True, exist_ok=True)
-        save_path = save_dir / f"data.{file_type}"
+        file_name = f"{dataset_id}{file_ext}"
+        file_path = Path("datasets") / file_name
         
         # Save the file
-        df.to_csv(save_path, index=False)
-        
-        # Infer schema
-        schema = {
-            "columns": [
-                {
-                    "name": col,
-                    "dtype": str(df[col].dtype),
-                    "is_numeric": pd.api.types.is_numeric_dtype(df[col]),
-                    "is_categorical": pd.api.types.is_categorical_dtype(df[col]),
-                    "is_datetime": pd.api.types.is_datetime64_any_dtype(df[col]),
-                    "n_unique": int(df[col].nunique()),
-                    "missing": int(df[col].isna().sum()),
-                }
-                for col in df.columns
-            ]
-        }
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        await save_upload_file(file, file_path)
         
         # Create dataset record
-        dataset = Dataset(
-            id=dataset_id,
+        dataset = DBDataset(
             name=name,
-            file_path=str(save_path),
-            file_type=file_type,
-            n_rows=len(df),
-            n_cols=len(df.columns),
-            target=target,
-            created_at=datetime.utcnow().isoformat(),
-            schema_json=schema
+            description=description,
+            file_path=str(file_path),
+            file_type=file_ext[1:],  # Remove the dot
+            file_size=file_path.stat().st_size,
+            num_rows=len(df),
+            num_columns=len(df.columns),
+            status=DatasetStatus.READY,
+            schema_info=infer_schema(df)
         )
         
-        # Store dataset (in-memory for now)
-        DATASETS[dataset_id] = dataset.dict()
+        # Save to database
+        session.add(dataset)
+        session.commit()
+        session.refresh(dataset)
         
         return dataset
         
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {str(e)}"
+        )
 
-@router.get("", response_model=List[Dataset])
-async def list_datasets():
-    """List all available datasets."""
-    return list(DATASETS.values())
+@router.get("", response_model=List[DBDataset])
+async def list_datasets(
+    *, 
+    session: Session = Depends(get_session),
+    skip: int = 0, 
+    limit: int = 100
+):
+    """List all available datasets with pagination."""
+    result = session.exec(select(DBDataset).offset(skip).limit(limit)).all()
+    return result
 
-@router.get("/{dataset_id}", response_model=Dataset)
-async def get_dataset(dataset_id: str):
+@router.get("/{dataset_id}", response_model=DBDataset)
+async def get_dataset(
+    *,
+    session: Session = Depends(get_session),
+    dataset_id: int
+):
     """Get details for a specific dataset."""
-    if dataset_id not in DATASETS:
-        raise HTTPException(status_code=404, detail="Dataset not found")
-    return DATASETS[dataset_id]
+    dataset = session.get(DBDataset, dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset with ID {dataset_id} not found"
+        )
+    return dataset
 
 @router.get("/{dataset_id}/preview")
-async def preview_dataset(dataset_id: str, n_rows: int = 100):
+async def preview_dataset(
+    *,
+    session: Session = Depends(get_session),
+    dataset_id: int,
+    n_rows: int = 100
+):
     """Preview the first n rows of a dataset."""
-    if dataset_id not in DATASETS:
-        raise HTTPException(status_code=404, detail="Dataset not found")
+    dataset = session.get(DBDataset, dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset with ID {dataset_id} not found"
+        )
     
-    dataset = DATASETS[dataset_id]
-    file_path = Path(dataset['file_path'])
+    file_path = Path(dataset.file_path)
+    if not file_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Data file not found at {file_path}"
+        )
     
     try:
-        if file_path.suffix == '.csv':
+        if dataset.file_type == 'csv':
             df = pd.read_csv(file_path, nrows=n_rows)
-        elif file_path.suffix == '.parquet':
+        elif dataset.file_type == 'parquet':
             df = pd.read_parquet(file_path).head(n_rows)
-        else:
-            df = pd.read_json(file_path, lines=True, nrows=n_rows)
+        else:  # json or jsonl
+            df = pd.read_json(file_path, lines=(dataset.file_type == 'jsonl'), nrows=n_rows)
             
         return json.loads(df.to_json(orient='records'))
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error(f"Error reading file {file_path}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error reading file: {str(e)}"
+        )
+
+@router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_dataset(
+    *,
+    session: Session = Depends(get_session),
+    dataset_id: int
+):
+    """Delete a dataset and its associated file."""
+    dataset = session.get(DBDataset, dataset_id)
+    if not dataset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Dataset with ID {dataset_id} not found"
+        )
+    
+    try:
+        # Delete the file
+        file_path = Path(dataset.file_path)
+        if file_path.exists():
+            file_path.unlink()
+        
+        # Delete the database record
+        session.delete(dataset)
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        logger.error(f"Error deleting dataset {dataset_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error deleting dataset: {str(e)}"
+        )
